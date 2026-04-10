@@ -8,13 +8,14 @@ import ClueList from './ClueList';
 interface Props {
   grid: Grid;
   placed: PlacedWord[];
+  skipped: string[];
   rows: number;
   cols: number;
   onReset: () => void;
   entries: WordEntry[];
 }
 
-export default function CrosswordView({ grid, placed, onReset }: Props) {
+export default function CrosswordView({ grid, placed, skipped, onReset }: Props) {
   const [showAnswers, setShowAnswers] = useState(false);
   const puzzleRef = useRef<HTMLDivElement>(null);
   const answerRef = useRef<HTMLDivElement>(null);
@@ -107,6 +108,21 @@ export default function CrosswordView({ grid, placed, onReset }: Props) {
             </div>
           </div>
         </div>
+
+        {/* 배치 실패 단어 안내 */}
+        {skipped.length > 0 && (
+          <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm">
+            <p className="font-semibold text-amber-700 mb-1">
+              교차점 없어 배치 못한 단어 ({skipped.length}개)
+            </p>
+            <p className="text-amber-600 text-xs">
+              {skipped.join(' · ')}
+            </p>
+            <p className="text-amber-500 text-xs mt-1">
+              다른 입력 단어와 공유하는 음절이 없어요. 단어를 바꾸거나 추가해보세요.
+            </p>
+          </div>
+        )}
 
         {/* 내보내기 버튼 */}
         <div className="flex flex-wrap gap-3 mt-4">

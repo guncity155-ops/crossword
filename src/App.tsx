@@ -6,7 +6,7 @@ import CrosswordView from './components/CrosswordView';
 
 type State =
   | { step: 'input' }
-  | { step: 'result'; grid: Grid; placed: PlacedWord[]; rows: number; cols: number; entries: WordEntry[] };
+  | { step: 'result'; grid: Grid; placed: PlacedWord[]; skipped: string[]; rows: number; cols: number; entries: WordEntry[] };
 
 export default function App() {
   const [state, setState] = useState<State>({ step: 'input' });
@@ -23,6 +23,7 @@ export default function App() {
       <CrosswordView
         grid={state.grid}
         placed={state.placed}
+        skipped={state.skipped}
         rows={state.rows}
         cols={state.cols}
         entries={state.entries}

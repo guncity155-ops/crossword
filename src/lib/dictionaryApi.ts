@@ -1,8 +1,8 @@
-// 국립국어원 한국어기초사전 (krdict) API
-// API 키 발급: https://krdict.korean.go.kr/openApi/openApiInfo
+// 국립국어원 우리말샘 Open API (opendict)
+// API 키 발급: https://opendict.korean.go.kr/service/openApiInfo
 // 브라우저 직접 호출 시 CORS 문제가 생길 수 있어 allorigins 프록시를 fallback으로 사용
 
-const KRDICT_BASE = 'https://krdict.korean.go.kr/api/search';
+const KRDICT_BASE = 'https://opendict.korean.go.kr/api/search';
 
 async function fetchXml(url: string): Promise<string> {
   // 직접 호출 시도
@@ -35,9 +35,20 @@ function parseDefinition(xml: string): string | null {
 export async function fetchDefinition(word: string, apiKey: string): Promise<string> {
   if (!apiKey.trim()) return '';
   try {
-    const url = `${KRDICT_BASE}?key=${apiKey.trim()}&q=${encodeURIComponent(word)}&part=word&sort=popular&num=1`;
-    const xml = await fetchXml(url);
-    return parseDefinition(xml) ?? '';
+    // req_type=json 으로 JSON 응답 요청
+    const url = `${KRDICT_BASE}?key=${apiKey.trim()}&q=${encodeURIComponent(word)}&req_type=json&part=word&sort=popular&num=1`;
+    const text = await fetchXml(url);
+
+    // JSON 파싱 시도
+    try {
+      const data = JSON.parse(text);
+      const def = data?.channel?.item?.[0]?.sense?.[0]?.definition;
+      if (def) return def.trim();
+    } catch {
+      // JSON 실패 → XML 파싱
+    }
+
+    return parseDefinition(text) ?? '';
   } catch {
     return '';
   }

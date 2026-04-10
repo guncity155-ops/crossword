@@ -3,36 +3,67 @@ import { BRIDGE_WORDS } from './bridgeWords';
 
 const GRID_SIZE = 30;
 
+// 교차 가능한 쌍 정보
+interface Crossing {
+  otherWord: string;
+  myIdx: number;    // 내 단어의 몇 번째 음절
+  theirIdx: number; // 상대 단어의 몇 번째 음절
+}
+
+// 단어 전체에 대한 교차 쌍 맵
+type CrossingMap = Map<string, Crossing[]>;
+
+// ─── 교차 쌍 사전 인덱싱 ──────────────────────────────────────────────
+
+function buildCrossingMap(words: string[]): CrossingMap {
+  const map: CrossingMap = new Map(words.map(w => [w, []]));
+
+  for (let i = 0; i < words.length; i++) {
+    for (let j = i + 1; j < words.length; j++) {
+      const w1 = words[i];
+      const w2 = words[j];
+      for (let ci = 0; ci < w1.length; ci++) {
+        for (let cj = 0; cj < w2.length; cj++) {
+          if (w1[ci] === w2[cj]) {
+            map.get(w1)!.push({ otherWord: w2, myIdx: ci, theirIdx: cj });
+            map.get(w2)!.push({ otherWord: w1, myIdx: cj, theirIdx: ci });
+          }
+        }
+      }
+    }
+  }
+
+  return map;
+}
+
+// ─── 그리드 유틸 ─────────────────────────────────────────────────────
+
 function emptyGrid(): Grid {
   return Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(null));
 }
 
-function cloneGrid(grid: Grid): Grid {
-  return grid.map(row => row.map(cell => (cell ? { ...cell } : null)));
-}
+// ─── 배치 가능성 검사 ─────────────────────────────────────────────────
 
-// 단어를 격자에 놓을 수 있는지 검사 (intersect 필요 여부 옵션)
 function canPlace(
   grid: Grid,
   word: string,
   row: number,
   col: number,
-  direction: 'across' | 'down',
-  requireIntersect = true
+  dir: 'across' | 'down'
 ): boolean {
-  const dr = direction === 'down' ? 1 : 0;
-  const dc = direction === 'across' ? 1 : 0;
+  const dr = dir === 'down' ? 1 : 0;
+  const dc = dir === 'across' ? 1 : 0;
   const len = word.length;
 
   if (row < 0 || col < 0) return false;
   if (row + dr * (len - 1) >= GRID_SIZE) return false;
   if (col + dc * (len - 1) >= GRID_SIZE) return false;
 
-  // 앞뒤 막힘 체크
+  // 단어 앞뒤로 막힌 칸 없어야 함
   const pr = row - dr; const pc = col - dc;
-  if (pr >= 0 && pc >= 0 && grid[pr][pc] !== null) return false;
+  if (pr >= 0 && pc >= 0 && grid[pr]?.[pc] !== null) return false;
   const nr = row + dr * len; const nc = col + dc * len;
-  if (nr < GRID_SIZE && nc < GRID_SIZE && grid[nr][nc] !== null) return false;
+  if (nr < GRID_SIZE && nc < GRID_SIZE && grid[nr]?.[nc] !== null) return false;
 
   let intersections = 0;
 
@@ -42,31 +73,34 @@ function canPlace(
     const cell = grid[r][c];
 
     if (cell !== null) {
+      // 교차점: 글자가 같아야 함
       if (cell.letter !== word[i]) return false;
       intersections++;
     } else {
-      // 수직 방향으로 인접한 칸에 다른 단어가 있으면 안 됨
+      // 빈 칸: 수직 방향 양옆에 다른 단어가 있으면 안 됨
       const s1r = r + dc; const s1c = c + dr;
       const s2r = r - dc; const s2c = c - dr;
-      if (s1r >= 0 && s1r < GRID_SIZE && s1c >= 0 && s1c < GRID_SIZE && grid[s1r][s1c] !== null) return false;
-      if (s2r >= 0 && s2r < GRID_SIZE && s2c >= 0 && s2c < GRID_SIZE && grid[s2r][s2c] !== null) return false;
+      if (grid[s1r]?.[s1c] !== null && grid[s1r]?.[s1c] !== undefined) return false;
+      if (grid[s2r]?.[s2c] !== null && grid[s2r]?.[s2c] !== undefined) return false;
     }
   }
 
-  if (requireIntersect && intersections === 0) return false;
-  return true;
+  // 첫 번째 단어가 아닌 이상 반드시 교차점 있어야 함
+  return intersections > 0;
 }
 
-function placeWord(
+// ─── 단어 실제 배치 ───────────────────────────────────────────────────
+
+function doPlace(
   grid: Grid,
   word: string,
   row: number,
   col: number,
-  direction: 'across' | 'down',
+  dir: 'across' | 'down',
   clue: string
 ): PlacedWord {
-  const dr = direction === 'down' ? 1 : 0;
-  const dc = direction === 'across' ? 1 : 0;
+  const dr = dir === 'down' ? 1 : 0;
+  const dc = dir === 'across' ? 1 : 0;
 
   for (let i = 0; i < word.length; i++) {
     const r = row + dr * i;
@@ -74,129 +108,36 @@ function placeWord(
     if (grid[r][c] === null) {
       grid[r][c] = { letter: word[i], across: null, down: null, isStart: false };
     }
-    if (direction === 'across') grid[r][c]!.across = 0;
+    if (dir === 'across') grid[r][c]!.across = 0;
     else grid[r][c]!.down = 0;
   }
 
-  return { word, clue, row, col, direction, number: 0 };
+  return { word, clue, row, col, direction: dir, number: 0 };
 }
 
-// 격자 내 특정 단어와 교차 가능한 위치 목록 반환
-function findIntersections(
-  grid: Grid,
-  word: string,
-  direction: 'across' | 'down'
-): { row: number; col: number }[] {
-  const dr = direction === 'down' ? 1 : 0;
-  const dc = direction === 'across' ? 1 : 0;
-  const results: { row: number; col: number }[] = [];
+// ─── 교차점 기반 위치 계산 후 배치 시도 ─────────────────────────────
 
-  for (let r = 0; r < GRID_SIZE; r++) {
-    for (let c = 0; c < GRID_SIZE; c++) {
-      if (grid[r][c] === null) continue;
-      const letter = grid[r][c]!.letter;
-      for (let i = 0; i < word.length; i++) {
-        if (word[i] === letter) {
-          const sr = r - dr * i;
-          const sc = c - dc * i;
-          if (canPlace(grid, word, sr, sc, direction)) {
-            results.push({ row: sr, col: sc });
-          }
-        }
-      }
-    }
-  }
-
-  return results;
-}
-
-// 중앙에 가까운 순서로 정렬
-function sortByCenter(candidates: { row: number; col: number }[]): { row: number; col: number }[] {
-  const c = GRID_SIZE / 2;
-  return [...candidates].sort((a, b) =>
-    Math.abs(a.row - c) + Math.abs(a.col - c) - (Math.abs(b.row - c) + Math.abs(b.col - c))
-  );
-}
-
-// 단어를 격자에 배치 시도 (양방향). 성공하면 PlacedWord 반환
-function tryPlaceWord(
+function tryPlaceViaCrossing(
   grid: Grid,
   word: string,
   clue: string,
-  preferDir?: 'across' | 'down'
+  wordIdx: number,    // 내 단어에서 교차할 음절 인덱스
+  crossR: number,     // 교차점 행
+  crossC: number,     // 교차점 열
+  dir: 'across' | 'down'
 ): PlacedWord | null {
-  const dirs: ('across' | 'down')[] = preferDir
-    ? [preferDir, preferDir === 'across' ? 'down' : 'across']
-    : ['across', 'down'];
+  const dr = dir === 'down' ? 1 : 0;
+  const dc = dir === 'across' ? 1 : 0;
+  const startR = crossR - dr * wordIdx;
+  const startC = crossC - dc * wordIdx;
 
-  for (const dir of dirs) {
-    const candidates = sortByCenter(findIntersections(grid, word, dir));
-    if (candidates.length > 0) {
-      return placeWord(grid, word, candidates[0].row, candidates[0].col, dir, clue);
-    }
+  if (canPlace(grid, word, startR, startC, dir)) {
+    return doPlace(grid, word, startR, startC, dir, clue);
   }
   return null;
 }
 
-// 브릿지 단어를 사용해 타겟 단어를 격자에 연결
-function tryWithBridge(
-  grid: Grid,
-  target: string,
-  targetClue: string,
-  usedWords: Set<string>
-): { bridgePlaced: PlacedWord; targetPlaced: PlacedWord } | null {
-  // 브릿지 단어를 셔플 (다양성)
-  const pool = [...BRIDGE_WORDS].sort(() => Math.random() - 0.5);
-
-  for (const bridge of pool) {
-    if (usedWords.has(bridge.word)) continue;
-    // 브릿지가 타겟 단어와 공유 음절을 가지는지 확인
-    const shares = [...bridge.word].some(ch => target.includes(ch));
-    if (!shares) continue;
-
-    // 브릿지를 기존 격자에 배치 시도
-    for (const bDir of ['across', 'down'] as const) {
-      const bCandidates = sortByCenter(findIntersections(grid, bridge.word, bDir));
-      if (bCandidates.length === 0) continue;
-
-      const tempGrid = cloneGrid(grid);
-      const bridgePlaced = placeWord(tempGrid, bridge.word, bCandidates[0].row, bCandidates[0].col, bDir, bridge.clue);
-
-      const tDir = bDir === 'across' ? 'down' : 'across';
-      const tCandidates = sortByCenter(findIntersections(tempGrid, target, tDir));
-      if (tCandidates.length > 0) {
-        // 성공 — 실제 격자에 반영
-        placeWord(grid, bridge.word, bCandidates[0].row, bCandidates[0].col, bDir, bridge.clue);
-        const targetPlaced = placeWord(grid, target, tCandidates[0].row, tCandidates[0].col, tDir, targetClue);
-        return { bridgePlaced, targetPlaced };
-      }
-    }
-  }
-  return null;
-}
-
-// 격자 내 빈 공간 찾기 (격리된 영역에 강제 배치용)
-function findForcedPosition(
-  grid: Grid,
-  word: string,
-  direction: 'across' | 'down'
-): { row: number; col: number } | null {
-  // 현재 격자 사용 범위 파악
-  let maxR = 0; let maxC = 0;
-  for (let r = 0; r < GRID_SIZE; r++) {
-    for (let c = 0; c < GRID_SIZE; c++) {
-      if (grid[r][c] !== null) { maxR = Math.max(maxR, r); maxC = Math.max(maxC, c); }
-    }
-  }
-
-  // 기존 격자 아래 2칸 여백 두고 배치
-  const startRow = direction === 'down' ? Math.min(maxR + 3, GRID_SIZE - word.length) : Math.min(maxR + 3, GRID_SIZE - 1);
-  const startCol = direction === 'across' ? 1 : 1;
-
-  if (startRow < 0 || startCol < 0) return null;
-  if (!canPlace(grid, word, startRow, startCol, direction, false)) return null;
-  return { row: startRow, col: startCol };
-}
+// ─── 트리밍 & 번호 부여 ───────────────────────────────────────────────
 
 function trimGrid(grid: Grid, placed: PlacedWord[]): { grid: Grid; placed: PlacedWord[] } {
   let minR = GRID_SIZE, maxR = 0, minC = GRID_SIZE, maxC = 0;
@@ -220,7 +161,8 @@ function trimGrid(grid: Grid, placed: PlacedWord[]): { grid: Grid; placed: Place
 
 function assignNumbers(grid: Grid, placed: PlacedWord[]): PlacedWord[] {
   let num = 1;
-  const rows = grid.length; const cols = grid[0]?.length ?? 0;
+  const rows = grid.length;
+  const cols = grid[0]?.length ?? 0;
   const numGrid: (number | null)[][] = Array.from({ length: rows }, () => Array(cols).fill(null));
 
   for (let r = 0; r < rows; r++) {
@@ -228,7 +170,7 @@ function assignNumbers(grid: Grid, placed: PlacedWord[]): PlacedWord[] {
       const cell = grid[r][c];
       if (!cell) continue;
       const isAcrossStart = (c === 0 || !grid[r][c - 1]) && c + 1 < cols && grid[r][c + 1];
-      const isDownStart = (r === 0 || !grid[r - 1][c]) && r + 1 < rows && grid[r + 1][c];
+      const isDownStart = (r === 0 || !grid[r - 1]?.[c]) && r + 1 < rows && grid[r + 1]?.[c];
       if (isAcrossStart || isDownStart) {
         numGrid[r][c] = num;
         cell.startNumber = num;
@@ -241,94 +183,151 @@ function assignNumbers(grid: Grid, placed: PlacedWord[]): PlacedWord[] {
   return placed.map(p => ({ ...p, number: numGrid[p.row]?.[p.col] ?? 0 }));
 }
 
-export function generateCrossword(entries: { word: string; clue: string }[]): {
+// ─── 메인 생성 함수 ───────────────────────────────────────────────────
+
+export interface GenerateResult {
   grid: Grid;
   placed: PlacedWord[];
+  skipped: string[];   // 교차점 없어 배치 못한 단어
   rows: number;
   cols: number;
-} {
-  // 긴 단어 먼저
-  const required = [...entries].sort((a, b) => b.word.length - a.word.length);
+}
+
+export function generateCrossword(entries: { word: string; clue: string }[]): GenerateResult {
+  const clueMap = new Map(entries.map(e => [e.word, e.clue || e.word]));
+  const words = entries.map(e => e.word);
+
+  // 브릿지 후보: 입력 단어와 교차 가능한 것만 추려서 풀에 추가
+  const bridgeCandidates = BRIDGE_WORDS.filter(b =>
+    !clueMap.has(b.word) &&
+    words.some(w => [...w].some(ch => b.word.includes(ch)))
+  );
+
+  const allWords = [...words, ...bridgeCandidates.map(b => b.word)];
+  bridgeCandidates.forEach(b => clueMap.set(b.word, b.clue));
+
+  // 교차 쌍 인덱싱
+  const crossingMap = buildCrossingMap(allWords);
+
+  // 앵커: 입력 단어 중 교차 가능 쌍이 가장 많은 단어
+  const anchor = [...words].sort(
+    (a, b) => (crossingMap.get(b)?.length ?? 0) - (crossingMap.get(a)?.length ?? 0)
+  )[0];
+
   const grid = emptyGrid();
   const placed: PlacedWord[] = [];
-  const usedWords = new Set<string>();
+  const placedSet = new Set<string>();
 
-  // 1. 첫 단어: 중앙 가로 배치
-  const first = required[0];
-  const startRow = Math.floor(GRID_SIZE / 2);
-  const startCol = Math.floor((GRID_SIZE - first.word.length) / 2);
-  placed.push(placeWord(grid, first.word, startRow, startCol, 'across', first.clue));
-  usedWords.add(first.word);
+  // 앵커 배치 (중앙 가로)
+  const anchorRow = Math.floor(GRID_SIZE / 2);
+  const anchorCol = Math.floor((GRID_SIZE - anchor.length) / 2);
+  placed.push(doPlace(grid, anchor, anchorRow, anchorCol, 'across', clueMap.get(anchor)!));
+  placedSet.add(anchor);
 
-  const unplaced: typeof required = [];
+  // 배치 대기열: 입력 단어 우선, 그 다음 브릿지
+  const queue = [
+    ...words.filter(w => w !== anchor),
+    ...bridgeCandidates.map(b => b.word),
+  ];
 
-  // 2. 나머지 단어: 교차 배치 시도
-  for (let i = 1; i < required.length; i++) {
-    const entry = required[i];
-    const preferDir: 'across' | 'down' = i % 2 === 0 ? 'across' : 'down';
-    const result = tryPlaceWord(grid, entry.word, entry.clue, preferDir);
-    if (result) {
-      placed.push(result);
-      usedWords.add(entry.word);
-    } else {
-      unplaced.push(entry);
-    }
-  }
+  // 교차 가능 쌍 수 기준으로 정렬 (연결성 높은 단어 먼저)
+  queue.sort((a, b) => (crossingMap.get(b)?.length ?? 0) - (crossingMap.get(a)?.length ?? 0));
 
-  // 3. 미배치 단어: 브릿지 단어로 연결 시도
-  const stillUnplaced: typeof required = [];
-  for (const entry of unplaced) {
-    const bridgeResult = tryWithBridge(grid, entry.word, entry.clue, usedWords);
-    if (bridgeResult) {
-      placed.push(bridgeResult.bridgePlaced);
-      placed.push(bridgeResult.targetPlaced);
-      usedWords.add(bridgeResult.bridgePlaced.word);
-      usedWords.add(entry.word);
-    } else {
-      stillUnplaced.push(entry);
-    }
-  }
+  // 여러 패스 시도 (이전 패스에서 새로 배치된 단어가 다음 단어의 앵커가 될 수 있음)
+  for (let pass = 0; pass < 4; pass++) {
+    let progress = false;
 
-  // 4. 그래도 못 배치된 단어: 2차 브릿지 시도 (교차 후 재시도)
-  const finalUnplaced: typeof required = [];
-  for (const entry of stillUnplaced) {
-    // 기존에 배치된 단어가 늘어났으므로 다시 직접 배치 시도
-    const retry = tryPlaceWord(grid, entry.word, entry.clue);
-    if (retry) {
-      placed.push(retry);
-      usedWords.add(entry.word);
-    } else {
-      const bridgeResult = tryWithBridge(grid, entry.word, entry.clue, usedWords);
-      if (bridgeResult) {
-        placed.push(bridgeResult.bridgePlaced);
-        placed.push(bridgeResult.targetPlaced);
-        usedWords.add(bridgeResult.bridgePlaced.word);
-        usedWords.add(entry.word);
-      } else {
-        finalUnplaced.push(entry);
+    for (let qi = queue.length - 1; qi >= 0; qi--) {
+      const word = queue[qi];
+      if (placedSet.has(word)) { queue.splice(qi, 1); continue; }
+
+      const crossings = crossingMap.get(word) ?? [];
+      let placed_ = false;
+
+      for (const cx of crossings) {
+        if (!placedSet.has(cx.otherWord)) continue;
+
+        // 상대 단어의 theirIdx 번째 음절의 실제 그리드 좌표 계산
+        const partner = placed.find(p => p.word === cx.otherWord)!;
+        const crossR = partner.direction === 'down'
+          ? partner.row + cx.theirIdx
+          : partner.row;
+        const crossC = partner.direction === 'across'
+          ? partner.col + cx.theirIdx
+          : partner.col;
+
+        // 상대와 수직 방향으로 배치 시도
+        const dir = partner.direction === 'across' ? 'down' : 'across';
+        const result = tryPlaceViaCrossing(grid, word, clueMap.get(word)!, cx.myIdx, crossR, crossC, dir);
+
+        if (result) {
+          placed.push(result);
+          placedSet.add(word);
+          queue.splice(qi, 1);
+          placed_ = true;
+          progress = true;
+          break;
+        }
+      }
+
+      // 같은 방향 교차도 시도 (다른 위치에서 만나는 경우)
+      if (!placed_) {
+        for (const cx of crossings) {
+          if (!placedSet.has(cx.otherWord)) continue;
+          const partner = placed.find(p => p.word === cx.otherWord)!;
+          const crossR = partner.direction === 'down'
+            ? partner.row + cx.theirIdx
+            : partner.row;
+          const crossC = partner.direction === 'across'
+            ? partner.col + cx.theirIdx
+            : partner.col;
+
+          // 같은 방향도 시도 (T자 배치가 아닌 ㄱ자 이어붙임 방지를 위해 검사 통과해야)
+          const result = tryPlaceViaCrossing(
+            grid, word, clueMap.get(word)!, cx.myIdx, crossR, crossC, partner.direction
+          );
+          if (result) {
+            placed.push(result);
+            placedSet.add(word);
+            queue.splice(qi, 1);
+            progress = true;
+            break;
+          }
+        }
       }
     }
+
+    if (!progress) break;
   }
 
-  // 5. 최후 수단: 격자 아래 강제 배치 (고립되어도 배치)
-  for (const entry of finalUnplaced) {
-    for (const dir of ['across', 'down'] as const) {
-      const pos = findForcedPosition(grid, entry.word, dir);
-      if (pos) {
-        placed.push(placeWord(grid, entry.word, pos.row, pos.col, dir, entry.clue));
-        usedWords.add(entry.word);
-        break;
-      }
-    }
-  }
+  // 배치 실패한 입력 단어 목록
+  const skipped = words.filter(w => !placedSet.has(w));
 
+  // 브릿지 단어는 placed에서 제외하지 않음 (힌트로 활용)
   const { grid: trimmed, placed: trimmedPlaced } = trimGrid(grid, placed);
   const numberedPlaced = assignNumbers(trimmed, trimmedPlaced);
 
   return {
     grid: trimmed,
     placed: numberedPlaced,
+    skipped,
     rows: trimmed.length,
     cols: trimmed[0]?.length ?? 0,
   };
+}
+
+// 디버그: 교차 가능 쌍 목록 반환 (UI에서 활용 가능)
+export function debugCrossings(words: string[]): { w1: string; w1Idx: number; w2: string; w2Idx: number }[] {
+  const results: { w1: string; w1Idx: number; w2: string; w2Idx: number }[] = [];
+  for (let i = 0; i < words.length; i++) {
+    for (let j = i + 1; j < words.length; j++) {
+      const w1 = words[i]; const w2 = words[j];
+      for (let ci = 0; ci < w1.length; ci++) {
+        for (let cj = 0; cj < w2.length; cj++) {
+          if (w1[ci] === w2[cj]) results.push({ w1, w1Idx: ci, w2, w2Idx: cj });
+        }
+      }
+    }
+  }
+  return results;
 }
